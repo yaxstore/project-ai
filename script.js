@@ -1,17 +1,13 @@
-// List API extractor (fallback berurutan)
-const APIS = [
-  "https://api.cobalt.tools/api/json",
-  "https://co.wuk.sh/api/json",
-  "https://cobalt-api.kwiatekmiki.com/api/json"
-];
+// ============================================
+// KONFIGURASI BACKEND
+// Ganti dengan URL Vercel lu setelah deploy
+// Contoh: https://media-backend-xxx.vercel.app/api/extract
+// ============================================
+const BACKEND = "https://project-ai-rouge-nine.vercel.app/";
 
-// Proxy CORS (buat bypass CORS dari GitHub Pages)
-const CORS_PROXIES = [
-  "https://corsproxy.io/?",
-  "https://api.allorigins.win/raw?url=",
-  "https://cors-anywhere.herokuapp.com/"
-];
-
+// ============================================
+// FUNGSI UTAMA
+// ============================================
 async function extract() {
   const url = document.getElementById('urlInput').value.trim();
   const result = document.getElementById('result');
@@ -27,7 +23,7 @@ async function extract() {
 
   const lower = url.toLowerCase();
 
-  // 1. Cek direct link media
+  // ---------- Direct Link Media ----------
   if (lower.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/)) {
     loading.textContent = "";
     result.innerHTML = renderImage(url);
@@ -51,110 +47,95 @@ async function extract() {
     return;
   }
 
-  // 2. Coba semua API + proxy (fallback berurutan)
-  let lastError = "";
+  // ---------- Pake Backend ----------
+  try {
+    const res = await fetch(BACKEND, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url })
+    });
 
-  for (const api of APIS) {
-    for (const proxy of CORS_PROXIES) {
-      try {
-        const target = proxy + encodeURIComponent(api);
-        const res = await fetch(target, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-          },
-          body: JSON.stringify({ url, vQuality: "1080", isNoTTWatermark: true })
-        });
-
-        if (!res.ok) {
-          lastError = `API ${api} → HTTP ${res.status}`;
-          continue;
-        }
-
-        const data = await res.json();
-        loading.textContent = "";
-
-        // Format response cobalt
-        if (data.status === "stream" || data.status === "redirect" || data.url) {
-          result.innerHTML = renderVideo(data.url) + renderDownload(data.url);
-          return;
-        }
-
-        if (data.status === "picker" && data.picker) {
-          let html = '<div class="card"><span class="tag">PILIH KUALITAS</span>';
-          data.picker.forEach(item => {
-            html += `<div style="margin-bottom:10px;">
-              <a href="${item.url}" target="_blank">${item.quality || 'default'} → download</a>
-            </div>`;
-          });
-          html += '</div>';
-          result.innerHTML = html;
-          return;
-        }
-
-        if (data.status === "error") {
-          lastError = data.text || "API error";
-          continue;
-        }
-
-        // Fallback: kalo ada url apapun di response
-        if (data.url) {
-          result.innerHTML = renderVideo(data.url) + renderDownload(data.url);
-          return;
-        }
-
-      } catch (e) {
-        lastError = e.message;
-        continue;
-      }
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
     }
-  }
 
-  // Semua API gagal
-  loading.textContent = "";
-  result.innerHTML = `<div class="card">
-    <span class="tag">ERROR</span>
-    <p style="color:#ff2e2e;font-size:13px;line-height:1.6;">
-      Gagal extract semua API.<br>
-      <small style="color:#666;">Last error: ${lastError || 'unknown'}</small><br><br>
-      <b style="color:#e0e0e0;">Kemungkinan penyebab:</b><br>
-      - API cobalt lagi down<br>
-      - CORS proxy limit<br>
-      - Link bukan media yang didukung<br><br>
-      <b style="color:#e0e0e0;">Solusi:</b><br>
-      1. Tes pake link direct media (.mp4/.jpg/.mp3)<br>
-      2. Kalo direct link jalan, berarti API nya down<br>
-      3. Setup backend sendiri pake yt-dlp (Vercel/Cloudflare)
-    </p>
-  </div>`;
+    const data = await res.json();
+    loading.textContent = "";
+
+    // Response stream / redirect
+    if (data.status === "stream" || data.status === "redirect" || data.url) {
+      result.innerHTML = renderVideo(data.url);
+      return;
+    }
+
+    // Response picker (pilihan kualitas)
+    if (data.status === "picker" && data.picker) {
+      let html = '<div class="card"><span class="tag">PILIH KUALITAS</span>';
+      data.picker.forEach(item => {
+        html += `<div style="margin-bottom:10px;">
+          <a href="${item.url}" target="_blank">${item.quality || 'default'} → download</a>
+        </div>`;
+      });
+      html += '</div>';
+      result.innerHTML = html;
+      return;
+    }
+
+    // Response error dari backend
+    result.innerHTML = `<div class="card"><span class="tag">ERROR</span>
+      <p style="color:#ff2e2e;font-size:13px;">${data.text || data.error || 'Extract gagal'}</p></div>`;
+
+  } catch (e) {
+    loading.textContent = "";
+    result.innerHTML = `<div class="card"><span class="tag">ERROR</span>
+      <p style="color:#ff2e2e;font-size:13px;line-height:1.7;">
+        Gagal extract: ${e.message}<br><br>
+        <b style="color:#e0e0e0;">Cek:</b><br>
+        1. Backend Vercel udah deploy?<br>
+        2. URL backend udah bener?<br>
+        3. Tes backend langsung di browser<br><br>
+        <small style="color:#666;">Backend: ${BACKEND}</small>
+      </p></div>`;
+  }
 }
 
+// ============================================
+// RENDER HELPER
+// ============================================
 function renderImage(url) {
   return `<div class="card"><span class="tag">IMAGE</span>
     <img src="${url}" referrerpolicy="no-referrer">
     ${renderDownload(url)}</div>`;
 }
+
 function renderVideo(url) {
   return `<div class="card"><span class="tag">VIDEO</span>
     <video controls src="${url}" referrerpolicy="no-referrer"></video>
     ${renderDownload(url)}</div>`;
 }
+
 function renderAudio(url) {
   return `<div class="card"><span class="tag">AUDIO</span>
     <audio controls src="${url}" referrerpolicy="no-referrer"></audio>
     ${renderDownload(url)}</div>`;
 }
+
 function renderDownload(url) {
   return `<a href="${url}" download target="_blank">⬇ Download langsung</a>`;
 }
 
+// ============================================
+// CLEAR
+// ============================================
 function clearAll() {
   document.getElementById('urlInput').value = "";
   document.getElementById('result').innerHTML = "";
   document.getElementById('loading').textContent = "";
 }
 
+// ============================================
+// AUTO LOAD DARI QUERY ?url=
+// ============================================
 window.onload = () => {
   const q = new URLSearchParams(location.search).get('url');
   if (q) {
